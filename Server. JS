@@ -1,0 +1,56 @@
+const WebSocket = require("ws");
+
+const server = new WebSocket.Server({
+  port: process.env.PORT || 8080
+});
+
+const rooms = new Map();
+
+server.on("connection", (player) => {
+  player.id = Math.random().toString(36).slice(2, 10);
+  player.room = null;
+
+  player.on("message", (data) => {
+    let msg;
+    try {
+      msg = JSON.parse(data);
+    } catch {
+      return;
+    }
+
+    if (msg.type === "join") {
+      const room = String(msg.room || "ARENA1");
+
+      if (!rooms.has(room)) {
+        rooms.set(room, new Set());
+      }
+
+      player.room = room;
+      rooms.get(room).add(player);
+
+      player.send(JSON.stringify({
+        type: "joined",
+        room
+      }));
+    }
+
+    if (msg.type === "state" && player.room) {
+      for (const other of rooms.get(player.room)) {
+        if (other !== player) {
+          other.send(JSON.stringify({
+            ...msg,
+            playerId: player.id
+          }));
+        }
+      }
+    }
+  });
+
+  player.on("close", () => {
+    if (player.room) {
+      rooms.get(player.room)?.delete(player);
+    }
+  });
+});
+
+console.log("ARENA STRIKE SERVER RUNNING");
