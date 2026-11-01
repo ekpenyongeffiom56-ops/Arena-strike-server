@@ -1,0 +1,80 @@
+const http = require("http");
+const WebSocket = require("ws");
+
+const PORT = process.env.PORT || 8080;
+
+const server = http.createServer((req, res) => {
+  res.writeHead(200, { "Content-Type": "text/plain" });
+  res.end("ARENA STRIKE SERVER IS RUNNING");
+});
+
+const wss = new WebSocket.Server({ server });
+const rooms = new Map();
+
+wss.on("connection", (player) => {
+  player.id = Math.random().toString(36).slice(2, 10);
+  player.room = null;
+
+  player.on("message", (data) => {
+    let msg;
+
+    try {
+      msg = JSON.parse(data.toString());
+    } catch {
+      return;
+    }
+
+    if (msg.type === "join") {
+      const room = String(msg.room || "ARENA1");
+
+      if (player.room) {
+        rooms.get(player.room)?.delete(player);
+      }
+
+      if (!rooms.has(room)) {
+        rooms.set(room, new Set());
+      }
+
+      player.room = room;
+      rooms.get(room).add(player);
+
+      player.send(JSON.stringify({
+        type: "joined",
+        room,
+        playerId: player.id
+      }));
+
+      return;
+    }
+
+    if (msg.type === "state" && player.room) {
+      const roomPlayers = rooms.get(player.room);
+
+      if (!roomPlayers) return;
+
+      for (const other of roomPlayers) {
+        if (other !== player && other.readyState === WebSocket.OPEN) {
+          other.send(JSON.stringify({
+            ...msg,
+            playerId: player.id
+          }));
+        }
+      }
+    }
+  });
+
+  player.on("close", () => {
+    if (player.room) {
+      const roomPlayers = rooms.get(player.room);
+      roomPlayers?.delete(player);
+
+      if (roomPlayers?.size === 0) {
+        rooms.delete(player.room);
+      }
+    }
+  });
+});
+
+server.listen(PORT, "0.0.0.0", () => {
+  console.log(`ARENA STRIKE SERVER RUNNING ON PORT ${PORT}`);
+});
